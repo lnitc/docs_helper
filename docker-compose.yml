@@ -10,7 +10,7 @@ services:
       - ./credentials:/credentials:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/credentials/gcp-key.json
-      - GCP_PROJECT_ID=your-gcp-project-id  # ここを書き換えてください
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
 
   frontend:
     build: ./frontend
