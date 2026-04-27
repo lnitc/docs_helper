@@ -5,6 +5,7 @@ from google.cloud import translate
 import os
 import io
 from PIL import Image
+import fitz  # PyMuPDFを追加
 
 app = FastAPI()
 
@@ -18,25 +19,73 @@ async def ocr_image(file: UploadFile = File(...)):
         client = vision.ImageAnnotatorClient()
         image = vision.Image(content=content)
         
-        # 筆記体や文書に強い document_text_detection を使用
         response = client.document_text_detection(
             image=image,
-            image_context={"language_hints": ["ru"]} # ロシア語を指定
+            image_context={"language_hints": ["ru"]}
         )
         
         if response.error.message:
             raise Exception(response.error.message)
 
-        text = response.full_text_annotation.text
+        text = response.full_text_annotation.text if response.full_text_annotation else ""
         return {"extracted_text": text}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/extract/pdf")
+async def extract_pdf(file: UploadFile = File(...)):
+    """PDFからテキストを抽出（デジタル/スキャン自動判定）"""
+    try:
+        content = await file.read()
+        # メモリ上でPDFを開く
+        doc = fitz.open(stream=content, filetype="pdf")
+        
+        # 1. まずはテキスト埋め込み（デジタルPDF）として抽出を試みる
+        extracted_text = ""
+        for page in doc:
+            extracted_text += page.get_text() + "\n"
+        
+        # テキストが一定量以上あれば「デジタルPDF」と判定して終了
+        # （※閾値の50文字は目安です。運用に合わせて調整してください）
+        if len(extracted_text.strip()) > 50:
+            return {
+                "extracted_text": extracted_text.strip(),
+                "method": "digital_extraction"
+            }
+        
+        # 2. テキストが抽出できなければ「スキャンPDF」と判定し、OCRへフォールバック
+        client = vision.ImageAnnotatorClient()
+        ocr_text = ""
+        
+        for page in doc:
+            # OCRの精度を上げるため、高解像度(dpi=200)で画像を生成
+            pix = page.get_pixmap(dpi=200)
+            img_bytes = pix.tobytes("jpeg")
+            
+            image = vision.Image(content=img_bytes)
+            response = client.document_text_detection(
+                image=image,
+                image_context={"language_hints": ["ru"]}
+            )
+            
+            if response.error.message:
+                raise Exception(response.error.message)
+            
+            if response.full_text_annotation:
+                ocr_text += response.full_text_annotation.text + "\n"
+                
+        return {
+            "extracted_text": ocr_text.strip(),
+            "method": "vision_ocr"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/translate/text")
 async def translate_text(payload: dict):
-    """テキストをロシア語から日本語へ翻訳 (Cloud Translation Advanced v3)"""
+    # 既存のまま変更なし
     text = payload.get("text", "")
     if not text:
         return {"translated_text": ""}

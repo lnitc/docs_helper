@@ -2,42 +2,63 @@ import streamlit as st
 import requests
 import os
 
-# Docker環境変数からバックエンドURLを取得
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="ロシア語業務翻訳アプリ", layout="wide")
 st.title("🇷🇺 ロシア語ドキュメント OCR & 翻訳システム")
 
-# セッションステート（状態保持）の初期化
 if "extracted_text" not in st.session_state:
     st.session_state.extracted_text = ""
 if "translated_text" not in st.session_state:
     st.session_state.translated_text = ""
 
-# --- Step 1: ファイルアップロード & OCR ---
-st.header("1. 画像のアップロードとテキスト化 (OCR)")
-uploaded_file = st.file_uploader("ロシア語の筆記体画像 (JPEG) をアップロード", type=["jpg", "jpeg", "png"])
+# --- Step 1: ファイルアップロード & テキスト抽出 ---
+st.header("1. ドキュメントのアップロードとテキスト抽出")
+# PDFも受け付けるように変更
+uploaded_file = st.file_uploader(
+    "ロシア語のファイル（画像またはPDF）をアップロード", 
+    type=["jpg", "jpeg", "png", "pdf"]
+)
 
 if uploaded_file is not None:
-    st.image(uploaded_file, caption="アップロードされた画像", width=500)
+    # 画像ファイルの場合はプレビューを表示
+    if uploaded_file.type in ["image/jpeg", "image/png"]:
+        st.image(uploaded_file, caption="アップロードされた画像", width=500)
+    elif uploaded_file.type == "application/pdf":
+        st.info("📄 PDFファイルがアップロードされました。")
     
-    if st.button("OCRでテキスト抽出を実行"):
-        with st.spinner("Google Cloud Vision APIで解析中..."):
+    if st.button("テキスト抽出を実行"):
+        with st.spinner("ドキュメントを解析中..."):
             files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            res = requests.post(f"{BACKEND_URL}/api/ocr/image", files=files)
+            
+            # ファイルの拡張子によってAPIを切り替え
+            if uploaded_file.name.lower().endswith(".pdf"):
+                endpoint = f"{BACKEND_URL}/api/extract/pdf"
+            else:
+                endpoint = f"{BACKEND_URL}/api/ocr/image"
+
+            res = requests.post(endpoint, files=files)
             
             if res.status_code == 200:
-                st.session_state.extracted_text = res.json().get("extracted_text", "")
-                st.success("テキストの抽出に成功しました！")
+                result_data = res.json()
+                st.session_state.extracted_text = result_data.get("extracted_text", "")
+                
+                # PDFの場合は、どちらの手法で抽出されたかバッジを表示すると親切です
+                method = result_data.get("method")
+                if method == "digital_extraction":
+                    st.success("テキスト抽出に成功しました！（高速モード：デジタルPDF）")
+                elif method == "vision_ocr":
+                    st.success("テキスト抽出に成功しました！（OCRモード：スキャンPDF）")
+                else:
+                    st.success("テキストの抽出に成功しました！")
             else:
-                st.error(f"OCRエラー: {res.text}")
+                st.error(f"抽出エラー: {res.text}")
 
 # --- Step 2: テキストの手動編集 ---
 st.header("2. テキストの確認・手動編集")
-st.info("OCRの誤認識があれば、ここで直接テキストを修正してください。")
+st.info("抽出の誤認識があれば、ここで直接テキストを修正してください。")
 edited_text = st.text_area("抽出されたロシア語テキスト", value=st.session_state.extracted_text, height=200)
 
-# 編集内容を常にステートに反映
 st.session_state.extracted_text = edited_text
 
 # --- Step 3: 翻訳 ---
@@ -61,8 +82,6 @@ if st.session_state.translated_text:
 
     # --- Step 4: ダウンロード ---
     st.header("4. 結果のダウンロード")
-    
-    # テキストファイルとしてダウンロード
     st.download_button(
         label="📄 翻訳結果をテキスト(txt)でダウンロード",
         data=st.session_state.translated_text,
