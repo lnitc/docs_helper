@@ -57,12 +57,29 @@ async def extract_pdf(file: UploadFile = File(...)):
         # 2. テキストが抽出できなければ「スキャンPDF」と判定し、OCRへフォールバック
         client = vision.ImageAnnotatorClient()
         ocr_text = ""
-        
+
+        # Vision API のインラインコンテンツ上限は約10MB
+        MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
         for page in doc:
-            # OCRの精度を上げるため、高解像度(dpi=200)で画像を生成
-            pix = page.get_pixmap(dpi=200)
-            img_bytes = pix.tobytes("jpeg")
-            
+            # 150 DPI はOCR精度を保ちつつサイズを抑えるバランス値
+            # alpha=False でアルファチャンネルを除去し、常に3バイト/画素(RGB)を保証する
+            pix = page.get_pixmap(dpi=150, colorspace=fitz.csRGB, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format="JPEG", quality=85, optimize=True)
+
+            # それでも上限を超える場合は画像を縮小
+            if img_buffer.tell() > MAX_IMAGE_BYTES:
+                scale = (MAX_IMAGE_BYTES / img_buffer.tell()) ** 0.5
+                new_size = (int(img.width * scale), int(img.height * scale))
+                img = img.resize(new_size, Image.LANCZOS)
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format="JPEG", quality=80, optimize=True)
+
+            img_bytes = img_buffer.getvalue()
+
             image = vision.Image(content=img_bytes)
             response = client.document_text_detection(
                 image=image,
