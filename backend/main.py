@@ -5,7 +5,7 @@ from google.cloud import translate
 import os
 import io
 from PIL import Image
-import fitz  # PyMuPDFを追加
+import fitz
 
 app = FastAPI()
 
@@ -123,28 +123,5 @@ async def translate_text(payload: dict):
         )
         translated = response.translations[0].translated_text
         return {"translated_text": translated}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/convert/images-to-pdf")
-async def images_to_pdf(files: list[UploadFile] = File(...)):
-    """複数のJPEGを1つのPDFに変換"""
-    try:
-        images = []
-        for file in files:
-            content = await file.read()
-            img = Image.open(io.BytesIO(content)).convert('RGB')
-            images.append(img)
-            
-        if not images:
-            raise HTTPException(status_code=400, detail="画像がありません")
-
-        pdf_bytes = io.BytesIO()
-        # 1枚目をベースに、残りをappendしていく
-        images[0].save(pdf_bytes, format='PDF', save_all=True, append_images=images[1:])
-        pdf_bytes.seek(0)
-        
-        return Response(content=pdf_bytes.read(), media_type="application/pdf")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
