@@ -11,6 +11,51 @@ app = FastAPI()
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "your-project-id")
 
+A4_WIDTH = 595
+A4_HEIGHT = 842
+
+@app.post("/api/convert/images-to-pdf")
+async def images_to_pdf(files: list[UploadFile] = File(...)):
+    try:
+        all_images = []
+        for file in files:
+            content = await file.read()
+            if file.content_type == "application/pdf" or (file.filename and file.filename.lower().endswith(".pdf")):
+                pdf_document = fitz.open(stream=content, filetype="pdf")
+                for page_num in range(len(pdf_document)):
+                    page = pdf_document.load_page(page_num)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    img = Image.frombytes("RGB", (int(pix.width), int(pix.height)), pix.samples)
+                    all_images.append(img)
+            else:
+                img = Image.open(io.BytesIO(content)).convert('RGB')
+                all_images.append(img)
+
+        if not all_images:
+            raise HTTPException(status_code=400, detail="有効なデータがありません")
+
+        processed_pages = []
+        for img in all_images:
+            canvas = Image.new('RGB', (A4_WIDTH * 2, A4_HEIGHT * 2), (255, 255, 255))
+            img.thumbnail((A4_WIDTH * 2, A4_HEIGHT * 2), Image.Resampling.LANCZOS)
+            offset = ((canvas.width - img.width) // 2, (canvas.height - img.height) // 2)
+            canvas.paste(img, offset)
+            processed_pages.append(canvas)
+
+        pdf_bytes = io.BytesIO()
+        processed_pages[0].save(
+            pdf_bytes,
+            format='PDF',
+            save_all=True,
+            append_images=processed_pages[1:],
+            resolution=100.0
+        )
+        pdf_bytes.seek(0)
+        return Response(content=pdf_bytes.read(), media_type="application/pdf")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/ocr/image")
 async def ocr_image(file: UploadFile = File(...)):
     """画像のロシア語筆記体をOCRでテキスト化"""
