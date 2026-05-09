@@ -1,9 +1,9 @@
 import streamlit as st
 
-st.set_page_config(page_title="ロシア語ドキュメント処理システム", layout="wide")
+st.set_page_config(page_title="ドキュメント処理システム", layout="wide")
 
-st.title("ロシア語ドキュメント処理システム")
-st.write("ロシア語のドキュメントを処理するための2つのツールを提供します。")
+st.title("ドキュメント処理システム")
+st.write("ドキュメントの OCR 抽出・翻訳・PDF 結合を行うツールです。")
 
 st.divider()
 
@@ -12,15 +12,15 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("OCR & 翻訳")
     st.write(
-        "ロシア語の画像・PDFからテキストを抽出し、日本語に翻訳します。"
+        "画像・PDFからテキストを抽出し、任意の言語に翻訳します。"
         "手書き・印刷文字に対応し、スキャンPDFも自動でOCR処理します。"
     )
     st.markdown("""
 - 画像（JPG・PNG）またはPDFをアップロード
+- 言語ペアを選択（Cloud Translation が対応する任意の言語）
 - Google Cloud Vision APIでテキスト抽出
 - デジタルPDFは高速モード、スキャンPDFはOCRモードで自動切替
 - 抽出テキストの手動編集が可能
-- Google Cloud Translation APIで日本語に翻訳
 - 翻訳結果をテキストファイルでダウンロード
 """)
 

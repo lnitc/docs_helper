@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 from google.cloud import vision
 from google.cloud import translate
@@ -17,11 +17,11 @@ A4_WIDTH = 595
 A4_HEIGHT = 842
 
 
-def _run_vision_ocr(content: bytes) -> str:
+def _run_vision_ocr(content: bytes, language_code: str = "en") -> str:
     image = vision.Image(content=content)
     response = vision_client.document_text_detection(
         image=image,
-        image_context={"language_hints": ["ru"]}
+        image_context={"language_hints": [language_code]}
     )
     if response.error.message:
         raise Exception(response.error.message)
@@ -44,6 +44,23 @@ def _pdf_page_to_jpeg(page) -> bytes:
         img.save(buf, format="JPEG", quality=80, optimize=True)
 
     return buf.getvalue()
+
+
+@app.get("/api/languages")
+async def get_supported_languages():
+    try:
+        parent = f"projects/{PROJECT_ID}/locations/global"
+        response = translate_client.get_supported_languages(
+            request={"parent": parent, "display_language_code": "ja"}
+        )
+        languages = [
+            {"code": lang.language_code, "name": lang.display_name}
+            for lang in response.languages
+            if lang.support_source and lang.support_target
+        ]
+        return {"languages": sorted(languages, key=lambda x: x["name"])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/convert/images-to-pdf")
@@ -90,16 +107,16 @@ async def images_to_pdf(files: list[UploadFile] = File(...)):
 
 
 @app.post("/api/ocr/image")
-async def ocr_image(file: UploadFile = File(...)):
+async def ocr_image(file: UploadFile = File(...), language: str = Form("en")):
     try:
         content = await file.read()
-        return {"extracted_text": _run_vision_ocr(content)}
+        return {"extracted_text": _run_vision_ocr(content, language)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/extract/pdf")
-async def extract_pdf(file: UploadFile = File(...)):
+async def extract_pdf(file: UploadFile = File(...), language: str = Form("en")):
     try:
         content = await file.read()
         doc = fitz.open(stream=content, filetype="pdf")
@@ -108,7 +125,7 @@ async def extract_pdf(file: UploadFile = File(...)):
         if len(digital_text.strip()) > 50:
             return {"extracted_text": digital_text.strip(), "method": "digital_extraction"}
 
-        ocr_text = "\n".join(_run_vision_ocr(_pdf_page_to_jpeg(page)) for page in doc)
+        ocr_text = "\n".join(_run_vision_ocr(_pdf_page_to_jpeg(page), language) for page in doc)
         return {"extracted_text": ocr_text.strip(), "method": "vision_ocr"}
 
     except Exception as e:
@@ -121,6 +138,9 @@ async def translate_text(payload: dict):
     if not text:
         return {"translated_text": ""}
 
+    source_language = payload.get("source_language", "en")
+    target_language = payload.get("target_language", "ja")
+
     try:
         parent = f"projects/{PROJECT_ID}/locations/global"
         response = translate_client.translate_text(
@@ -128,8 +148,8 @@ async def translate_text(payload: dict):
                 "parent": parent,
                 "contents": [text],
                 "mime_type": "text/plain",
-                "source_language_code": "ru",
-                "target_language_code": "ja",
+                "source_language_code": source_language,
+                "target_language_code": target_language,
             }
         )
         return {"translated_text": response.translations[0].translated_text}
