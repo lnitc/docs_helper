@@ -32,6 +32,12 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
     st.info(f"{len(uploaded_files)} 件のファイルが選択されています。")
 
+normalize = st.checkbox(
+    "画像サイズの調整（A4サイズに統一・中央配置）",
+    value=True,
+    key=f"pdf_normalize_{st.session_state.pdf_reset_key}"
+)
+
 if st.button("PDFを作成", disabled=not uploaded_files):
     st.session_state.pdf_result = None
     with st.spinner("PDFを作成中..."):
@@ -39,7 +45,11 @@ if st.button("PDFを作成", disabled=not uploaded_files):
             ("files", (f.name, f.getvalue(), f.type))
             for f in uploaded_files
         ]
-        res = requests.post(f"{BACKEND_URL}/api/convert/images-to-pdf", files=files_to_send)
+        res = requests.post(
+            f"{BACKEND_URL}/api/convert/images-to-pdf",
+            files=files_to_send,
+            data={"normalize": str(normalize).lower()}
+        )
 
         if res.status_code == 200:
             st.session_state.pdf_result = res.content

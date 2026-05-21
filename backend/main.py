@@ -64,15 +64,18 @@ async def get_supported_languages():
 
 
 @app.post("/api/convert/images-to-pdf")
-async def images_to_pdf(files: list[UploadFile] = File(...)):
+async def images_to_pdf(files: list[UploadFile] = File(...), normalize: str = Form("false")):
     try:
+        normalize_flag = normalize.lower() == "true"
+        scale = fitz.Matrix(2, 2) if normalize_flag else fitz.Matrix(1, 1)
+
         all_images = []
         for file in files:
             content = await file.read()
             if file.content_type == "application/pdf" or (file.filename and file.filename.lower().endswith(".pdf")):
                 pdf_document = fitz.open(stream=content, filetype="pdf")
                 for page in pdf_document:
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    pix = page.get_pixmap(matrix=scale)
                     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                     all_images.append(img)
             else:
@@ -82,23 +85,20 @@ async def images_to_pdf(files: list[UploadFile] = File(...)):
         if not all_images:
             raise HTTPException(status_code=400, detail="有効なデータがありません")
 
-        canvas_size = (A4_WIDTH * 2, A4_HEIGHT * 2)
-        processed_pages = []
-        for img in all_images:
-            canvas = Image.new('RGB', canvas_size, (255, 255, 255))
-            img.thumbnail(canvas_size, Image.Resampling.LANCZOS)
-            offset = ((canvas.width - img.width) // 2, (canvas.height - img.height) // 2)
-            canvas.paste(img, offset)
-            processed_pages.append(canvas)
-
         pdf_bytes = io.BytesIO()
-        processed_pages[0].save(
-            pdf_bytes,
-            format='PDF',
-            save_all=True,
-            append_images=processed_pages[1:],
-            resolution=100.0
-        )
+        if normalize_flag:
+            canvas_size = (A4_WIDTH * 2, A4_HEIGHT * 2)
+            pages = []
+            for img in all_images:
+                canvas = Image.new('RGB', canvas_size, (255, 255, 255))
+                img.thumbnail(canvas_size, Image.Resampling.LANCZOS)
+                offset = ((canvas.width - img.width) // 2, (canvas.height - img.height) // 2)
+                canvas.paste(img, offset)
+                pages.append(canvas)
+            pages[0].save(pdf_bytes, format='PDF', save_all=True, append_images=pages[1:], resolution=100.0)
+        else:
+            all_images[0].save(pdf_bytes, format='PDF', save_all=True, append_images=all_images[1:], resolution=72.0)
+
         pdf_bytes.seek(0)
         return Response(content=pdf_bytes.read(), media_type="application/pdf")
 
