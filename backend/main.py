@@ -16,6 +16,19 @@ translate_client = translate.TranslationServiceClient()
 A4_WIDTH = 595
 A4_HEIGHT = 842
 
+# Document Translation API（translate_document）がサポートする形式
+DOCUMENT_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+# オンライン（同期）ドキュメント翻訳のファイルサイズ上限
+MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+
 
 def _run_vision_ocr(content: bytes, language_code: str = "en") -> str:
     image = vision.Image(content=content)
@@ -153,5 +166,56 @@ async def translate_text(payload: dict):
             }
         )
         return {"translated_text": response.translations[0].translated_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/translate/document")
+async def translate_document(
+    file: UploadFile = File(...),
+    source_language: str = Form("en"),
+    target_language: str = Form("ja"),
+):
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    mime_type = DOCUMENT_MIME_TYPES.get(ext)
+    if mime_type is None:
+        supported = ", ".join(sorted(DOCUMENT_MIME_TYPES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"対応していないファイル形式です。対応形式: {supported}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="ファイルサイズが20MBを超えています（オンライン翻訳の上限）。",
+        )
+
+    try:
+        parent = f"projects/{PROJECT_ID}/locations/global"
+        request = {
+            "parent": parent,
+            "source_language_code": source_language,
+            "target_language_code": target_language,
+            "document_input_config": {"content": content, "mime_type": mime_type},
+        }
+
+        response = translate_client.translate_document(request=request)
+        translated_bytes = b"".join(
+            chunk for chunk in response.document_translation.byte_stream_outputs
+        )
+
+        base_name = os.path.splitext(os.path.basename(filename))[0] or "document"
+        download_name = f"translated_{base_name}{ext}"
+
+        return Response(
+            content=translated_bytes,
+            media_type=mime_type,
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

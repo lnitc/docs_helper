@@ -18,6 +18,15 @@ Built with **FastAPI** (backend) and **Streamlit** (frontend), powered by **Goog
 - Translate with Google Cloud Translation API
 - Download the translation result as a `.txt` file
 
+### Document Translation (Layout-Preserving)
+- Upload a Word (.doc/.docx), PowerPoint (.ppt/.pptx), Excel (.xls/.xlsx), or PDF file
+- Translate the entire document with Google Cloud **Document Translation API**, keeping the original layout and formatting intact — no text extraction or manual editing step
+- Online (synchronous) translation only: 20MB file size limit (native PDF up to 300 pages, scanned PDF up to 20 pages)
+- Output format always matches the input format (PDF→DOCX conversion is a batch-only feature in the Document Translation API and is out of scope here)
+- Download the translated document directly in its original format
+
+> **Note:** This is different from "OCR & Translation" above, which extracts plain text (so it can be manually edited) and does not preserve document layout/formatting. Use "OCR & Translation" for images/scanned PDFs where you want to review or fix the extracted text; use "Document Translation" when you want the whole file translated as-is.
+
 ### PDF Compiler
 - Upload multiple images (JPG/PNG) and/or PDFs
 - Merge them into a single A4-sized PDF in upload order
@@ -167,8 +176,9 @@ docs_helper/
 ├── frontend/
 │   ├── app.py             # Home page
 │   ├── pages/
-│   │   ├── 1_OCR翻訳.py   # OCR & Translation page
-│   │   └── 2_PDFコンパイラ.py  # PDF Compiler page
+│   │   ├── 1_OCR翻訳.py            # OCR & Translation page
+│   │   ├── 2_PDFコンパイラ.py      # PDF Compiler page
+│   │   └── 3_ドキュメント翻訳.py   # Document Translation (layout-preserving) page
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── credentials/           # Place gcp-key.json here (gitignored)
