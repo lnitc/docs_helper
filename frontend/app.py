@@ -3,11 +3,11 @@ import streamlit as st
 st.set_page_config(page_title="ドキュメント処理システム", layout="wide")
 
 st.title("ドキュメント処理システム")
-st.write("ドキュメントの OCR 抽出・翻訳・PDF 結合を行うツールです。")
+st.write("ドキュメントの OCR 抽出・翻訳・PDF 結合・画像グリッド印刷を行うツールです。")
 
 st.divider()
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.subheader("🔍 OCR & 翻訳")
@@ -49,6 +49,20 @@ with col3:
 - A4サイズに自動整形・中央配置
 - ファイルの順番通りにページを結合
 - 結合済みPDFをダウンロード
+""")
+
+with col4:
+    st.subheader("🖼️ 画像グリッド印刷")
+    st.write(
+        "正方形の画像を指定サイズ（例: 58mm）に縮小し、**A4 1枚のグリッド**に並べてPDF化します。"
+        "コンビニ印刷して切り抜く、ジャンクジャーナリング用途に便利です。"
+    )
+    st.markdown("""
+- 正方形画像（JPG・PNG）を複数選択
+- 1辺のサイズと切り取り用の余白（mm）を指定
+- A4に収まる最大枚数を自動計算し、超過時は警告
+- 画像は中央基準で正方形に切り抜き・縮小
+- A4サイズのPDFをダウンロード
 """)
 
 st.divider()
