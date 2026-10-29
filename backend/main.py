@@ -236,6 +236,147 @@ async def images_grid_to_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _best_photo_grid(width_mm: float, height_mm: float, gap_mm: float):
+    """長方形セルをA4縦1ページに最も多く並べられる配置を求める。
+
+    セルは縦向き・横向きの両方を試し、枚数が多い方を採用する（向きは問わない）。
+    戻り値は dict（枚数・列数・行数・採用したセルの幅高さmm・回転有無）。
+    """
+    if width_mm <= 0 or height_mm <= 0:
+        raise ValueError("縦・横のサイズは0より大きい値を指定してください。")
+    if gap_mm < 0:
+        raise ValueError("余白は0以上の値を指定してください。")
+
+    def _count(available: float, dim: float) -> int:
+        return int((available + gap_mm) // (dim + gap_mm))
+
+    best = None
+    for cell_w, cell_h, rotated in (
+        (width_mm, height_mm, False),
+        (height_mm, width_mm, True),
+    ):
+        cols = _count(A4_WIDTH_MM, cell_w)
+        rows = _count(A4_HEIGHT_MM, cell_h)
+        candidate = {
+            "max_images": cols * rows,
+            "columns": cols,
+            "rows": rows,
+            "cell_width_mm": cell_w,
+            "cell_height_mm": cell_h,
+            "rotated": rotated,
+        }
+        if best is None or candidate["max_images"] > best["max_images"]:
+            best = candidate
+    return best
+
+
+@app.get("/api/images/photo-grid-capacity")
+async def photo_grid_capacity(
+    width_mm: float = 89.0, height_mm: float = 127.0, gap_mm: float = 2.0
+):
+    """指定した縦横サイズ・余白でA4縦1ページに収まる最大枚数を返す。"""
+    try:
+        return _best_photo_grid(width_mm, height_mm, gap_mm)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _fit_into_cell(img: Image.Image, cell_w_px: int, cell_h_px: int) -> Image.Image:
+    """画像の比率を保ったままセルに収める。必要なら90度回転して大きく配置する。"""
+    iw, ih = img.size
+    scale_normal = min(cell_w_px / iw, cell_h_px / ih)
+    scale_rotated = min(cell_w_px / ih, cell_h_px / iw)
+
+    if scale_rotated > scale_normal:
+        img = img.rotate(90, expand=True)
+        iw, ih = img.size
+        scale = scale_rotated
+    else:
+        scale = scale_normal
+
+    new_w = max(1, round(iw * scale))
+    new_h = max(1, round(ih * scale))
+    return img.resize((new_w, new_h), Image.LANCZOS)
+
+
+@app.post("/api/images/photo-grid-to-pdf")
+async def photo_grid_to_pdf(
+    files: list[UploadFile] = File(...),
+    width_mm: str = Form("89"),
+    height_mm: str = Form("127"),
+    gap_mm: str = Form("2"),
+):
+    """写真を比率を保ったままA4縦1ページのグリッドに配置したPDFを返す。"""
+    try:
+        try:
+            w_val = float(width_mm)
+            h_val = float(height_mm)
+            gap_val = float(gap_mm)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="サイズ・余白は数値で指定してください。")
+
+        try:
+            grid = _best_photo_grid(w_val, h_val, gap_val)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        cols, rows = grid["columns"], grid["rows"]
+        max_images = grid["max_images"]
+        if max_images < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="指定サイズが大きすぎてA4に1枚も配置できません。",
+            )
+
+        if len(files) > max_images:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"画像が多すぎます。{w_val:g}×{h_val:g}mm・余白{gap_val:g}mmでは"
+                    f"A4に最大{max_images}枚（{cols}列×{rows}行）まで配置できます。"
+                    f"現在{len(files)}枚選択されています。"
+                ),
+            )
+
+        px_per_mm = GRID_DPI / 25.4
+        cell_w = round(grid["cell_width_mm"] * px_per_mm)
+        cell_h = round(grid["cell_height_mm"] * px_per_mm)
+        gap_px = round(gap_val * px_per_mm)
+        page_w = round(A4_WIDTH_MM * px_per_mm)
+        page_h = round(A4_HEIGHT_MM * px_per_mm)
+
+        canvas = Image.new("RGB", (page_w, page_h), (255, 255, 255))
+
+        grid_w = cols * cell_w + (cols - 1) * gap_px
+        grid_h = rows * cell_h + (rows - 1) * gap_px
+        origin_x = (page_w - grid_w) // 2
+        origin_y = (page_h - grid_h) // 2
+
+        for idx, file in enumerate(files):
+            content = await file.read()
+            img = Image.open(io.BytesIO(content)).convert("RGB")
+            img = _fit_into_cell(img, cell_w, cell_h)
+
+            col = idx % cols
+            row = idx // cols
+            cell_x = origin_x + col * (cell_w + gap_px)
+            cell_y = origin_y + row * (cell_h + gap_px)
+            # セル内で中央配置
+            x = cell_x + (cell_w - img.width) // 2
+            y = cell_y + (cell_h - img.height) // 2
+            canvas.paste(img, (x, y))
+
+        pdf_bytes = io.BytesIO()
+        canvas.save(pdf_bytes, format="PDF", resolution=float(GRID_DPI))
+        pdf_bytes.seek(0)
+        return Response(content=pdf_bytes.read(), media_type="application/pdf")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/ocr/image")
 async def ocr_image(file: UploadFile = File(...), language: str = Form("en")):
     try:
